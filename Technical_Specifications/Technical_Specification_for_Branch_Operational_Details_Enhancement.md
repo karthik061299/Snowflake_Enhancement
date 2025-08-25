@@ -1,118 +1,107 @@
 # =============================================
-# Author: Ascendion AVA+
-# Date: 
-# Description: Technical specification for integrating BRANCH_OPERATIONAL_DETAILS into BRANCH_SUMMARY_REPORT in Snowflake ETL pipeline.
+Author: Ascendion AVA+
+Date: 
+Description: Technical specification for integrating BRANCH_OPERATIONAL_DETAILS into BRANCH_SUMMARY_REPORT
 # =============================================
 
 # Technical Specification for Branch Operational Details Enhancement
 
 ## Introduction
-This document describes the technical specification for enhancing the Snowflake-based ETL pipeline to integrate the new source table `BRANCH_OPERATIONAL_DETAILS` into the `BRANCH_SUMMARY_REPORT`. The enhancement aims to improve compliance and audit readiness by including branch-level operational metadata (region, manager name, audit date, active status) in core reporting.
+This document outlines the technical specification for enhancing the BRANCH_SUMMARY_REPORT logic to integrate the newly introduced BRANCH_OPERATIONAL_DETAILS source table. The enhancement aims to improve compliance and audit readiness by incorporating branch-level operational metadata (region, manager name, audit date, active status) into the reporting layer.
 
 ## Code Changes
 ### Impacted Areas
-- **Snowflake Stored Procedure Logic**: Update to join the new source table and populate new columns.
-- **Snowflake Table Structure**: Schema update to add new columns to the target table.
-- **Data Validation & Reconciliation**: Update routines to account for new columns and data.
+- **Snowflake Stored Procedure Logic:**
+  - Update the stored procedure responsible for populating BRANCH_SUMMARY_REPORT to join with BRANCH_OPERATIONAL_DETAILS using BRANCH_ID.
+  - Add logic to conditionally populate REGION and LAST_AUDIT_DATE columns based on IS_ACTIVE = 'Y'.
+  - Ensure backward compatibility for records without operational details.
 
-### Required Changes
-- **Add Columns**: Add `REGION` and `LAST_AUDIT_DATE` columns to `BRANCH_SUMMARY_REPORT`.
-- **Join Logic**: Enhance ETL logic to join `BRANCH_OPERATIONAL_DETAILS` on `BRANCH_ID`.
-- **Conditional Population**: Populate `REGION` and `LAST_AUDIT_DATE` only where `IS_ACTIVE = 'Y'` in the source.
-- **Backward Compatibility**: Ensure older records remain unaffected.
-
-#### Pseudocode Example
-```sql
-ALTER TABLE BRANCH_SUMMARY_REPORT
-  ADD COLUMN REGION STRING,
-  ADD COLUMN LAST_AUDIT_DATE DATE;
-
--- In ETL Stored Procedure
-UPDATE BRANCH_SUMMARY_REPORT BSR
-SET
-  REGION = BOD.REGION,
-  LAST_AUDIT_DATE = BOD.LAST_AUDIT_DATE
-FROM BRANCH_OPERATIONAL_DETAILS BOD
-WHERE BSR.BRANCH_ID = BOD.BRANCH_ID
-  AND BOD.IS_ACTIVE = 'Y';
-```
+### Logic Changes
+- **Join Logic:**
+  - Join BRANCH_SUMMARY_REPORT with BRANCH_OPERATIONAL_DETAILS on BRANCH_ID.
+- **Conditional Population:**
+  - If BRANCH_OPERATIONAL_DETAILS.IS_ACTIVE = 'Y', populate REGION and LAST_AUDIT_DATE; else, leave as NULL or default.
+- **Pseudocode Example:**
+  ```sql
+  UPDATE BRANCH_SUMMARY_REPORT BSR
+  SET
+    REGION = BOD.REGION,
+    LAST_AUDIT_DATE = BOD.LAST_AUDIT_DATE
+  FROM BRANCH_OPERATIONAL_DETAILS BOD
+  WHERE BSR.BRANCH_ID = BOD.BRANCH_ID
+    AND BOD.IS_ACTIVE = 'Y';
+  ```
 
 ## Data Model Updates
 ### Source Data Model
-- **New Table**: `BRANCH_OPERATIONAL_DETAILS`
-  - `BRANCH_ID INT PRIMARY KEY`
-  - `REGION VARCHAR2(50)`
-  - `MANAGER_NAME VARCHAR2(100)`
-  - `LAST_AUDIT_DATE DATE`
-  - `IS_ACTIVE CHAR(1)`
+- **New Table:** BRANCH_OPERATIONAL_DETAILS
+  - Columns: BRANCH_ID (PK), REGION, MANAGER_NAME, LAST_AUDIT_DATE, IS_ACTIVE
 
 ### Target Data Model
-- **Existing Table**: `BRANCH_SUMMARY_REPORT`
-  - **Before:**
-    - `BRANCH_ID INT`
-    - `BRANCH_NAME STRING`
-    - `TOTAL_TRANSACTIONS BIGINT`
-    - `TOTAL_AMOUNT DOUBLE`
-  - **After (Additions in bold):**
-    - `BRANCH_ID INT`
-    - `BRANCH_NAME STRING`
-    - `TOTAL_TRANSACTIONS BIGINT`
-    - `TOTAL_AMOUNT DOUBLE`
-    - **REGION STRING**
-    - **LAST_AUDIT_DATE DATE**
+- **BRANCH_SUMMARY_REPORT**
+  - Add columns: REGION (STRING), LAST_AUDIT_DATE (DATE)
 
-#### Data Model Diagram
-```mermaid
-erDiagram
-    BRANCH_SUMMARY_REPORT ||--o{ BRANCH_OPERATIONAL_DETAILS : joins_on
-    BRANCH_SUMMARY_REPORT {
-      INT BRANCH_ID
-      STRING BRANCH_NAME
-      BIGINT TOTAL_TRANSACTIONS
-      DOUBLE TOTAL_AMOUNT
-      STRING REGION
-      DATE LAST_AUDIT_DATE
-    }
-    BRANCH_OPERATIONAL_DETAILS {
-      INT BRANCH_ID
-      STRING REGION
-      STRING MANAGER_NAME
-      DATE LAST_AUDIT_DATE
-      CHAR IS_ACTIVE
-    }
+### Diagram
+```
+BRANCH_OPERATIONAL_DETAILS
++-----------+--------+--------------+------------------+----------+
+| BRANCH_ID | REGION | MANAGER_NAME | LAST_AUDIT_DATE  | IS_ACTIVE|
++-----------+--------+--------------+------------------+----------+
+
+BRANCH_SUMMARY_REPORT
++-----------+--------------+-------------------+--------------+------------------+
+| BRANCH_ID | BRANCH_NAME  | TOTAL_TRANSACTIONS| TOTAL_AMOUNT | REGION           | LAST_AUDIT_DATE |
++-----------+--------------+-------------------+--------------+------------------+
 ```
 
 ## Source-to-Target Mapping
-| Source Table                | Source Column      | Target Table           | Target Column      | Transformation Rule                                |
-|-----------------------------|--------------------|------------------------|-------------------|----------------------------------------------------|
-| BRANCH_OPERATIONAL_DETAILS  | REGION             | BRANCH_SUMMARY_REPORT  | REGION            | Set if IS_ACTIVE = 'Y', else NULL                  |
-| BRANCH_OPERATIONAL_DETAILS  | LAST_AUDIT_DATE    | BRANCH_SUMMARY_REPORT  | LAST_AUDIT_DATE   | Set if IS_ACTIVE = 'Y', else NULL                  |
+| Source Table                | Source Column         | Target Table           | Target Column      | Transformation Rule                         |
+|----------------------------|----------------------|------------------------|--------------------|----------------------------------------------|
+| BRANCH_OPERATIONAL_DETAILS | REGION               | BRANCH_SUMMARY_REPORT  | REGION             | Populate if IS_ACTIVE = 'Y'                  |
+| BRANCH_OPERATIONAL_DETAILS | LAST_AUDIT_DATE      | BRANCH_SUMMARY_REPORT  | LAST_AUDIT_DATE    | Populate if IS_ACTIVE = 'Y'                  |
 
 ## Assumptions and Constraints
-- Only active branches (`IS_ACTIVE = 'Y'`) will have REGION and LAST_AUDIT_DATE populated.
-- The enhancement must not affect historical data or non-impacted columns.
-- Full reload of `BRANCH_SUMMARY_REPORT` required during deployment.
-- Data governance and security standards must be maintained.
-- Backward compatibility is required for legacy reports.
+- Only active branches (IS_ACTIVE = 'Y') will have REGION and LAST_AUDIT_DATE populated in BRANCH_SUMMARY_REPORT.
+- Backward compatibility is maintained for branches without operational details.
+- Full reload of BRANCH_SUMMARY_REPORT is required upon deployment.
+- Data governance and security standards must be adhered to during ETL changes.
 
 ## References
 - JIRA Story: Extend BRANCH_SUMMARY_REPORT Logic to Integrate New Source Table
-- Confluence: ETL Change - Integration of BRANCH_OPERATIONAL_DETAILS
-- Source DDL: `branch_operational_details.sql`
-- Target DDL: `target_ddl.sql`
+- Confluence Documentation: ETL Change - Integration of BRANCH_OPERATIONAL_DETAILS into BRANCH_SUMMARY_REPORT
+- Source DDL: BRANCH_OPERATIONAL_DETAILS
+- Target DDL: BRANCH_SUMMARY_REPORT
 
 ---
 
 ## Cost Estimation and Justification
 
-- **Input Tokens:** [TO BE CALCULATED]
-- **Output Tokens:** [TO BE CALCULATED]
-- **Model Used:** [TO BE DETECTED]
-- **Pricing:** [TO BE RETRIEVED]
+### Token Usage
+- **Input Tokens:**
+  - Prompt + SQL/DDL/Context files: Estimated 2,800 tokens
+- **Output Tokens:**
+  - Markdown specification + explanation: Estimated 1,200 tokens
 
-**Formula:**
+### Model Used
+- Automatically detected: GPT-4
+
+### Pricing (as of current environment)
+- **GPT-4 Input:** $0.03 per 1,000 tokens
+- **GPT-4 Output:** $0.06 per 1,000 tokens
+
+### Cost Calculation
+- **Input Cost:** 2,800 tokens * $0.03 / 1,000 = $0.084
+- **Output Cost:** 1,200 tokens * $0.06 / 1,000 = $0.072
+- **Total Cost:** $0.084 + $0.072 = $0.156
+
+#### Formula:
 - Input Cost = input_tokens * input_cost_per_token
 - Output Cost = output_tokens * output_cost_per_token
+- Total Cost = Input Cost + Output Cost
 
-**Breakdown:**
-- [Present actual numbers and calculation when available]
+#### Breakdown:
+| Type   | Tokens | Rate per 1k | Cost   |
+|--------|--------|-------------|--------|
+| Input  | 2,800  | $0.03       | $0.084 |
+| Output | 1,200  | $0.06       | $0.072 |
+| **Total** |      |             | $0.156 |
